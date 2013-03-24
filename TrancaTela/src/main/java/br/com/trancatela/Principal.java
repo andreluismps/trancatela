@@ -75,16 +75,17 @@ public class Principal implements DiscoveryListener {
 	}
 
 	public void deviceDiscovered(RemoteDevice btDevice, DeviceClass arg1) {
-		String name;
+		String name = "";
 		try {
 			name = btDevice.getFriendlyName(false);
 		} catch (Exception e) {
 			name = btDevice.getBluetoothAddress();
 		}
-
+		if(name.equals("MotoA953")){
 		devices.add(btDevice);
 		Nokia = devices.get(0);
 		System.out.println("device found: " + name);
+		}
 
 	}
 
