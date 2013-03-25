@@ -1,8 +1,10 @@
-package br.com.trancatela;
+package br.com.trancatela.util;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.List;
 
+import javax.bluetooth.BluetoothStateException;
 import javax.bluetooth.DataElement;
 import javax.bluetooth.DeviceClass;
 import javax.bluetooth.DiscoveryAgent;
@@ -14,28 +16,42 @@ import javax.bluetooth.UUID;
 import javax.microedition.io.Connector;
 import javax.obex.ClientSession;
 
-
 import com.intel.bluetooth.RemoteDeviceHelper;
 
-public class Principal implements DiscoveryListener {
+public class BluetoothUtil implements DiscoveryListener {
 
 	private static Object lock = new Object();
 	public ArrayList<RemoteDevice> devices;
+	
+	public ArrayList<String> nomes;
+	
+	public ArrayList<Boolean> ativos;
+	
+	public int posicaoAtiva;
+	
+	DiscoveryAgent agent;
+	
+	int minRSSI;
+	
+	private RemoteDevice activeDevice;
 
-	static RemoteDevice Android_Device, Nokia;
-
-	public Principal() {
+	public BluetoothUtil() {
 		devices = new ArrayList<RemoteDevice>();
+		nomes = new ArrayList<String>();
 	}
 
 	public static void main(String[] args) {
-		Principal listener = new Principal();
+		new BluetoothUtil().getDevices();
+	}
 
+	public String[] getDevices() {
+
+		String[] saida = null;
 		try {
 			LocalDevice localDevice = LocalDevice.getLocalDevice();
 
-			DiscoveryAgent agent = localDevice.getDiscoveryAgent();
-			agent.startInquiry(DiscoveryAgent.GIAC, listener);
+			agent = localDevice.getDiscoveryAgent();
+			agent.startInquiry(DiscoveryAgent.GIAC, this);
 
 			try {
 				synchronized (lock) {
@@ -43,34 +59,52 @@ public class Principal implements DiscoveryListener {
 				}
 			} catch (InterruptedException e) {
 				e.printStackTrace();
-				return;
+				return null;
 			}
-
+			
 			System.out.println("Device Inquiry Completed. ");
-
-			UUID[] uuidSet = new UUID[1];
-			uuidSet[0] = new UUID(0x1105); // OBEX Object Push service
-
-			int[] attrIDs = new int[] { 0x0100 // Service name
-			};
-
-			for (RemoteDevice device : listener.devices) {
-				agent.searchServices(attrIDs, uuidSet, device, listener);
-
-				try {
-					synchronized (lock) {
-						lock.wait();
-					}
-				} catch (InterruptedException e) {
-					e.printStackTrace();
-					return;
-				}
-
-				System.out.println("Service search finished.");
-			}
-
+			
+			saida = (String[]) nomes.toArray(new String[nomes.size()]);
+			
 		} catch (Exception e) {
 			e.printStackTrace();
+		}
+		return saida;
+	}
+	
+	public void execute(List<String> listaNomes, int rssi) {
+		
+		UUID[] uuidSet = new UUID[1];
+		uuidSet[0] = new UUID(0x1105); // OBEX Object Push service
+		minRSSI = rssi;
+		int[] attrIDs = new int[] { 0x0100 // Service name
+		};
+		while(true){
+		for (RemoteDevice device : devices) {
+			try {
+				ativos = new ArrayList<Boolean>(listaNomes.size());
+				for (String nome : listaNomes) {
+					if (device.getFriendlyName(false).equals(nome)) {
+						
+						activeDevice = device;
+						agent.searchServices(attrIDs, uuidSet, device, this);
+						
+						try {
+							synchronized (lock) {
+								lock.wait();
+							}
+						} catch (InterruptedException e) {
+							e.printStackTrace();
+							return;
+						}
+					}
+				}
+			} catch (Exception e1) {
+				// TODO Auto-generated catch block
+				e1.printStackTrace();
+			}
+			//System.out.println("Service search finished.");
+		}
 		}
 	}
 
@@ -81,11 +115,10 @@ public class Principal implements DiscoveryListener {
 		} catch (Exception e) {
 			name = btDevice.getBluetoothAddress();
 		}
-		if(name.equals("MotoA953")){
+		
 		devices.add(btDevice);
-		Nokia = devices.get(0);
+		nomes.add(name);
 		System.out.println("device found: " + name);
-		}
 
 	}
 
@@ -103,6 +136,7 @@ public class Principal implements DiscoveryListener {
 
 	
 	public void servicesDiscovered(int transID, ServiceRecord[] servRecord) {
+		
 		for (int i = 0; i < servRecord.length; i++) {
 			String url = servRecord[i].getConnectionURL(
 					ServiceRecord.NOAUTHENTICATE_NOENCRYPT, false);
@@ -111,58 +145,50 @@ public class Principal implements DiscoveryListener {
 			}
 			DataElement serviceName = servRecord[i].getAttributeValue(0x0100);
 			if (serviceName != null) {
-				System.out.println("service " + serviceName.getValue()
-						+ " found " + url);
+				//System.out.println("service " + serviceName.getValue() + " found " + url);
 
 				if (serviceName.getValue().equals("OBEX Object Push")) {
 					sendMessageToDevice(url);
 				}
 			} else {
-				System.out.println("service found " + url);
+				//System.out.println("service found " + url);
 			}
 
 		}
 	}
 
-	private static void sendMessageToDevice(String serverURL) {
+	private void sendMessageToDevice(String serverURL) {
+		 
 		try {
-			System.out.println("Connecting to " + serverURL);
+			//System.out.println("Connecting to " + serverURL);
 
 			ClientSession clientSession = (ClientSession) Connector.open(serverURL);
 
 			PollRSSI();
 
-			clientSession.disconnect(null);
-
 			clientSession.close();
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
+		
 	}
 
-	public static void PollRSSI() {
+	public void PollRSSI() throws Exception {
 		int rssi = 0;
 
-		try {
-
-			while (true) {
-				try {
-					if (Nokia != null)
-						rssi = RemoteDeviceHelper.readRSSI(Nokia);
-					System.out.println("Nokia RSSI = " + rssi);
-					if (rssi < -5) {
-						trancaTela();
-					}
-				} catch (Exception e) {
-					e.printStackTrace();
-				}
-
-				Thread.sleep(500);
+		rssi = RemoteDeviceHelper.readRSSI(activeDevice);
+		System.out.println(activeDevice.getFriendlyName(false) + " RSSI = " + rssi);
+		ativos.add(rssi >= minRSSI);
+		int totalInativos = 0;
+		for(Boolean ativo : ativos){
+			if (!ativo){
+				totalInativos++;
 			}
-
-		} catch (Exception e) {
-			e.printStackTrace();
 		}
+		if (totalInativos == ativos.size()){
+			trancaTela();
+		}
+		
 
 	}
 
@@ -177,4 +203,5 @@ public class Principal implements DiscoveryListener {
 			Runtime.getRuntime().exec("xscreensaver-command -activate");
 		}
 	}
+
 }
